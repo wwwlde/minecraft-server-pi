@@ -1,0 +1,147 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cuberite-config
+  namespace: minecraft
+data:
+  webadmin.ini: |
+    [User:wwwlde]
+    Password=cuberiteRock
+
+    [WebAdmin]
+    Ports=8080
+    Enabled=1
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: minecraft
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minecraft-server-pi
+  namespace: minecraft
+spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minecraft
+  template:
+    metadata:
+      labels:
+        app: minecraft
+    spec:
+      volumes:
+        - name: world
+          persistentVolumeClaim:
+            claimName: minecraft-world
+        - name: cuberite-config
+          configMap:
+            name: cuberite-config
+      containers:
+        - name: minecraft
+          image: joycelin79/cuberite
+          tty: true
+          imagePullPolicy: Always
+          volumeMounts:
+            - name: world
+              mountPath: /app/cuberite/build-cuberite/Server/world
+              subPath: world
+            - name: world
+              mountPath: /app/cuberite/build-cuberite/Server/world_nether
+              subPath: world_nether
+            - name: world
+              mountPath: /app/cuberite/build-cuberite/Server/world_the_end
+              subPath: world_the_end
+            - name: world
+              mountPath: /app/cuberite/build-cuberite/Server/players
+              subPath: players
+            - name: cuberite-config
+              mountPath: /app/cuberite/build-cuberite/Server/webadmin.ini
+              subPath: webadmin.ini
+          ports:
+            - name: minecraft
+              containerPort: 25565
+            - name: webadmin
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: 50m
+              memory: 100Mi
+            limits:
+              cpu: 1
+              memory: 2Gi
+          env:
+            - name: EULA
+              value: "TRUE"
+            - name: TYPE
+              value: PAPER
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minecraft-server
+  namespace: minecraft
+  labels:
+    app: minecraft
+spec:
+  type: NodePort
+  ports:
+    - port: 25565
+      nodePort: 30565
+  selector:
+    app: minecraft
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minecraft-webadmin
+  namespace: minecraft
+  labels:
+    app: minecraft
+spec:
+  type: ClusterIP
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+  selector:
+    app: minecraft
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: minecraft-webadmin
+  namespace: minecraft
+spec:
+  rules:
+    - host: cuberite.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              serviceName: minecraft-webadmin
+              servicePort: 80
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minecraft-world
+  namespace: minecraft
+  labels:
+    app: minecraft
+spec:
+  storageClassName: "local-path"
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
